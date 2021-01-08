@@ -6,6 +6,7 @@ Author: Luke Causer
 """
 
 import numpy as np
+import copy
 
 class KMC():
     
@@ -21,6 +22,8 @@ class KMC():
         # Store the model and set variables
         self.model = model
         self.num_sims = 0
+        self.observables = []
+        self.measures = []
         
         return None
     
@@ -64,26 +67,34 @@ class KMC():
     
     
     # Run a KMC simulation
-    def simulation(self, initial, max_time):
+    def simulation(self, initial, max_time, obs_idxs = None):
         """ Runs a simulation.
         
         Parameters:
             initial: The initial state of the system
             max_time: Time to run the simulation for
+            obs_idxs: Identifiers for observables (default: None)
             
         Returns:
             idxs: List of identifiers which tell how the system transitions
             times: List of times when transitions occur
+            observables: list of measured observables (optional)
         """
         
         # Update the model with the IS, and calculate initial TRs
-        self.model.update_state(initial)
+        self.model.update_state(copy.deepcopy(initial))
         self.model.update_transition_rates(0, True)
         
-        # Keep track of how much time has occur and store trajectory
+        # Variables to keep track of system variables
         t = 0
         idxs = []
         times = []
+        if obs_idxs != None:
+            observables = []
+            for idx in obs_idxs:
+                measure = self.observables[idx][1](self.model.state, self)
+                observables.append([measure])
+                
         
         # Loop until the max time is passed
         while t < max_time:
@@ -93,30 +104,207 @@ class KMC():
             # Randomly pick a jump time
             escape_rate = self.escape_rate(self.model.transition_rates)
             time = self.transition_time(escape_rate)
-            
-            # Update the system
-            self.model.transition(idx)
-            self.model.update_transition_rates(idx)
             t += time
             
             # Check to see we haven't surpassed max_time
             if t <= max_time:
+                # Update the system
+                self.model.transition(idx)
+                self.model.update_transition_rates(idx)
+                
+                # Measure observables
+                if obs_idxs != None:
+                    i = 0 # Count the indexs
+                    for obj_idx in obs_idxs:
+                        measure = self.observables[obj_idx][1](self.model.state, self)
+                        observables[i].append(measure)
+                    i += 1
+                
                 # Store new trajectory information
                 idxs.append(idx)
                 times.append(t)
         
-        return [idxs, times]
+        # Return data
+        if obs_idxs == None:
+            return [idxs, times]
+        else:
+            return [idxs, times, observables]
+    
+    
+    # Uses the data from KMC to reconstruct the whole trajectory
+    def reconstruct(self, initial, idxs, times):
+        """ Reconstructs a trajectory with the minimum information needed.
+        
+        Parameters:
+            initial: initial state
+            idxs: list of identifiers for transitions
+            times: list of times which transitions occur
+            
+        Returns:
+            trajectory: list of configs in trajectory
+            ts: times of transitions
+        """
+        
+        # Create the lists
+        trajectory = [initial]
+        ts = [0]
+        config = copy.deepcopy(initial) # Create a copy to edit
+        self.model.update_state(config) # Set the state
+        
+        # Loop through each transition
+        for i in range(np.size(idxs)):
+            # Update configuration
+            self.model.transition(idxs[i])
+            config = self.model.state
+            
+            # Store in lists
+            trajectory.append(copy.deepcopy(config))
+            ts.append(copy.deepcopy(times[i]))
+        
+        return [trajectory, ts]
+    
+    
+    # Save the data
+    def save(self, initial, idxs, times, directory):
+        """ Save the data to the given file directory
+        
+        Parameters:
+            initial: initial state
+            idxs: list of identifiers for transitions
+            times: list of times which transitions occur
+            directory: the filename where to save the data
+        """
+        
+        # Create a data list and save it
+        data = np.array([], dtype=np.object_)
+        np.save(directory, data, True)
+        
+        return True
     
     
     # Run a number of simulations
-    def run(self, num, max_time):
+    def run(self, num, max_time, save=False, quiet=False):
         """ Runs a number of simulation.
         
         Parameters:
             num: Number of simulations
             max_time
+            save: Directory to save data (default = False)
+            quiet: Hide messages? (default = False)
         """
         
+        # Check which observables are configuration and trajectory based
+        obs_config = []
+        obs_traj = []
+        i = 0
+        for obs in self.observables:
+            if obs[2] == "configuration":
+                obs_config.append(i)
+            else:
+                obs_traj.append(i)
+            i += 1
+                        
+        
+        # Loop through the number of simulations
+        for i in range(num):
+            # Run a simulation
+            initial = self.model.initial() # Generate initial state
+            [idxs, times, observables] = self.simulation(initial, max_time, obs_config) # Simulate
+            
+            # Measure observables
+            [trajectory, ts] = self.reconstruct(initial, idxs, times)
+            j = 0
+            for idx in obs_config: # Configurations
+                measure = self.time_integrate(observables[j], ts, max_time)
+                self.update_observable(idx, measure)
+                j += 1
+            for idx in obs_traj: # Trajectories
+                measure = self.observables[idx][1](trajectory, ts, self)
+                self.update_observable(idx, measure)
+            
+            # Update the number of simulations
+            self.num_sims += 1
+            
+            # Save data
+            if save is not False:
+                directory = save + str(i) + '.npy' # Create directory name
+                self.save(initial, idxs, times, directory) # Save it
+            
+            # Print out message
+            if quiet != True:
+                print("Simulation "+str(i+1)+"/"+str(num)+" completed.")
+                     
+        return True
+    
+    
+    # Add an observable to measure
+    def observer(self, name, func, act='configuration'):
+        """ Add an observable to measure.
+        
+        Parameters:
+            name (string): Give a name to the observable to reference it by.
+            func: Pass through a lambdea function which takes the KMC class
+                  as a parameter.
+            act: 'configuration' acts on local configurations over a time int,
+                  'trajectory' is an observable which acts on the whole traj.
+        """
+        
+        # Ensure the name has not already been used
+        for obs in self.observables:
+            if obs[0] == name:
+                print("Observables must be given unique identifiers.")
+                return False
+        
+        # Check the type is valid
+        if act != 'configuration' and act != 'trajectory':
+            print("The act must be 'configuration' or 'trajectory'.")
+            return False
+        
+        # Store the observable
+        self.observables.append([name, func, act])
+        self.measures.append([])
+        return True
+    
+    
+    # Update an observable
+    def update_observable(self, idx, data):
+        """ Update an observable.
+        
+        Parameters:
+            idx: identifier for the observable
+            data: data to update
+        """
+        
+        # Update
+        if self.num_sims == 0:
+            self.measures[idx] = data
+        else:
+            self.measures[idx] += data
+        
+        return True
+    
+    
+    # Calculates the time integration over an observable
+    def time_integrate(self, observable, times, time_max):
+        """ Calculates the time integration over an observable, measured
+        across a trajectory.
+        
+        Parameters:
+            observable: list of observable
+            times: list of transition times
+            time_max: maximum trajectory time
+        """
+        
+        observable = np.array(observable)
+        
+        # Create a list of times including tmax and find the difference
+        ts = np.append(times, time_max)
+        t_diffs = ts[1:] - ts[0:np.size(ts)-1]
+        
+        # Integrate
+        integ = np.tensordot(t_diffs, np.array(observable), axes=(0,0))
+        
+        return integ
         
             
             

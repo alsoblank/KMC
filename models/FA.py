@@ -1,10 +1,13 @@
 """
-A model for N two-level systems, which flip independantly from one-another.
+FA model with N spins.
+Same as spin model but with a unique constraint
 """
 
 import numpy as np
+import copy
+from models.spin import spin
 
-class spin():
+class famodel(spin):
     
     # Initiate the class
     def __init__(self, N, c = 0.5):
@@ -41,18 +44,6 @@ class spin():
         return None
     
     
-    # Sets the state of the model
-    def update_state(self, state):
-        """ Updates the state of the system.
-        
-        Parameters:
-            state (numpy array): the input state
-        """
-        
-        self.state = state
-        return True
-    
-    
     # Calculate the transition rates
     def update_transition_rates(self, idx, initial=False):
         """ Updates the transition rates for the current system state.
@@ -64,41 +55,29 @@ class spin():
         """
         
         # What sites must be calculated
-        if initial is not False:
-            idxs = [idx]
+        if initial is False:
+            if idx == 0:
+                idxs = [0, 1]
+            elif idx == self.size - 1:
+                idxs = [idx, idx-1]
+            else:
+                idxs = [idx-1, idx, idx+1]
         else:
             idxs = list(range(0, self.size))
         
         # Update each index
         for i in idxs:
             self.transition_rates[i] = (1-self.c)**self.state[i] * self.c**(1-self.state[i])
+            if i == 0:
+                self.transition_rates[i] *= self.state[i+1].astype(np.float_)
+            elif i == self.size - 1:
+                self.transition_rates[i] *= self.state[i-1].astype(np.float_)
+            else:
+                self.transition_rates[i] *= self.state[i-1].astype(np.float_) + self.state[i+1].astype(np.float_)
+                
         
         return True
     
-    
-    # Perform the transition into a new configuration
-    def transition(self, idx):
-        """ Transitions the system into a new configuration.
-        
-        Parameters:
-            idx (int): Identifier for the system to transition.
-        """
-        
-        # Update the system
-        self.state[idx] = 1 - self.state[idx]
-        
-        return True
+
     
     
-    # Generate a configuration from equilibrium
-    def equilibrium_configuration(self):
-        """ Generates a configuration sampled from equilibrium. """
-        
-        # Generate list of random numbers
-        rs = np.random.rand(self.size)
-        
-        # Find the config
-        config = rs < self.c
-        config.astype(np.bool_)
-            
-        return config
