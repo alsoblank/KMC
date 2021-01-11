@@ -54,27 +54,27 @@ class famodel(spin):
                      (default: false)
         """
         
-        # What sites must be calculated
-        if initial is False:
+        # Construct full state
+        state = np.zeros(self.size+2, dtype=np.float_)
+        state[1:self.size+1] = self.state
+        
+        # If initial, calculate all
+        if initial is not False:
+            # Calculate constraint
+            self.transition_rates = state[0:self.size] + state[2:self.size+2]
+            self.transition_rates *= (1-self.c)**self.state * self.c**(1-self.state)
+        else:
             if idx == 0:
-                idxs = [0, 1]
+                idxs = [idx, idx+1]
             elif idx == self.size - 1:
                 idxs = [idx, idx-1]
             else:
                 idxs = [idx-1, idx, idx+1]
-        else:
-            idxs = list(range(0, self.size))
-        
-        # Update each index
-        for i in idxs:
-            self.transition_rates[i] = (1-self.c)**self.state[i] * self.c**(1-self.state[i])
-            if i == 0:
-                self.transition_rates[i] *= self.state[i+1].astype(np.float_)
-            elif i == self.size - 1:
-                self.transition_rates[i] *= self.state[i-1].astype(np.float_)
-            else:
-                self.transition_rates[i] *= self.state[i-1].astype(np.float_) + self.state[i+1].astype(np.float_)
-                
+            
+            for i in idxs:
+                self.transition_rates[i] = (1-self.c)**self.state[i] * self.c**(1-self.state[i])
+                self.transition_rates[i] *= state[i].astype(np.float_) + state[i+2].astype(np.float_)
+            
         
         return True
     

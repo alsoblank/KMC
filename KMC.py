@@ -7,6 +7,7 @@ Author: Luke Causer
 
 import numpy as np
 import copy
+import time as timelib
 
 class KMC():
     
@@ -24,6 +25,8 @@ class KMC():
         self.num_sims = 0
         self.observables = []
         self.measures = []
+        self.obs_config = []
+        self.obs_traj = []
         
         return None
     
@@ -83,7 +86,7 @@ class KMC():
         
         # Update the model with the IS, and calculate initial TRs
         self.model.update_state(copy.deepcopy(initial))
-        self.model.update_transition_rates(0, True)
+        self.model.update_transition_rates(0, True)        
         
         # Variables to keep track of system variables
         t = 0
@@ -191,34 +194,22 @@ class KMC():
             max_time
             save: Directory to save data (default = False)
             quiet: Hide messages? (default = False)
-        """
-        
-        # Check which observables are configuration and trajectory based
-        obs_config = []
-        obs_traj = []
-        i = 0
-        for obs in self.observables:
-            if obs[2] == "configuration":
-                obs_config.append(i)
-            else:
-                obs_traj.append(i)
-            i += 1
-                        
+        """                        
         
         # Loop through the number of simulations
         for i in range(num):
             # Run a simulation
             initial = self.model.initial() # Generate initial state
-            [idxs, times, observables] = self.simulation(initial, max_time, obs_config) # Simulate
+            [idxs, times, observables] = self.simulation(initial, max_time, self.obs_config) # Simulate
             
             # Measure observables
             [trajectory, ts] = self.reconstruct(initial, idxs, times)
             j = 0
-            for idx in obs_config: # Configurations
+            for idx in self.obs_config: # Configurations
                 measure = self.time_integrate(observables[j], ts, max_time)
                 self.update_observable(idx, measure)
                 j += 1
-            for idx in obs_traj: # Trajectories
+            for idx in self.obs_traj: # Trajectories
                 measure = self.observables[idx][1](trajectory, ts, self)
                 self.update_observable(idx, measure)
             
@@ -263,6 +254,12 @@ class KMC():
         # Store the observable
         self.observables.append([name, func, act])
         self.measures.append([])
+        
+        # Add to relevent list
+        if act == 'configuration':
+            self.obs_config.append(len(self.observables)-1)
+        else:
+            self.obs_traj.append(len(self.observables)-1)
         return True
     
     
@@ -282,6 +279,7 @@ class KMC():
             self.measures[idx] += data
         
         return True
+    
     
     
     # Calculates the time integration over an observable
@@ -305,7 +303,52 @@ class KMC():
         integ = np.tensordot(t_diffs, np.array(observable), axes=(0,0))
         
         return integ
+    
         
-            
-            
-            
+    # Find the index of a named observable
+    def get_observable_idx(self, name):
+        """ Returns the index where a named observable is stored.
+        
+        Parameters:
+            name: string for name
+        
+        Returns:
+            idx: identifer for index (None if does not exist)
+        """
+        
+        idx = 0
+        for observable in self.observables:
+            if observable[0] == name:
+                return idx
+            idx += 1
+        
+        return None
+    
+    
+    # Return an observable
+    def get_measure(self, name):
+        """ Returns the average observable measure.
+        
+        Parameters:
+            name: string for name
+        
+        Returns:
+            data
+        """
+        
+        idx = self.get_observable_idx(name)
+        if idx == None:
+            print("Observable not defined.")
+            return False
+    
+        return self.measures[idx] / self.num_sims
+        
+"""          
+act = lambda trajectory, times, KMC: activity(trajectory, times, KMC)
+occ = lambda configuration, KMC: occupations(configuration, KMC)
+Fa = famodel(100, 0.5)
+sim = KMC(Fa)
+sim.observer("Activity", act, 'trajectory')
+#sim.observer("Occupations", occ, 'configuration')
+sim.run(10000, 10)        
+"""           
