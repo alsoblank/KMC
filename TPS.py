@@ -25,6 +25,11 @@ class TPS(KMC):
         super().__init__(model)
         self.criterion = criterion
         
+        # Trajectory info
+        self.trajectory = None
+        self.sims = 0
+        self.acceptance = 0
+        
         return None
     
     
@@ -256,58 +261,55 @@ class TPS(KMC):
             quiet: Hide messages? (default = False)
         """
         
-        # Store the acceptance rate
-        acceptance = 0
-        
         # Generate an initial trajectory and reconstruct it, find properties
-        initial = self.model.initial()
-        [idxs, ts, obs_config] = self.simulation(initial, max_time, self.obs_config)
-        [trajectory, times] = self.reconstruct(initial, idxs, ts)
-        obs_traj = self.calculate_trajectory_observables(trajectory, times) 
-        prob = self.criterion(obs_config, obs_traj, self)    
+        if self.trajectory == None:
+            initial = self.model.initial()
+            [idxs, ts, obs_config] = self.simulation(initial, max_time, self.obs_config)
+            [trajectory, times] = self.reconstruct(initial, idxs, ts)
+            obs_traj = self.calculate_trajectory_observables(trajectory, times) 
+            prob = self.criterion(times, obs_config, obs_traj, self)  
+            self.trajectory = [trajectory, times, obs_config, obs_traj, prob]
         
         
         # Loop through for the total number of simulations
         for i in range(num_sim+warm_up):
             # Propose a new trajectory and calculate properties
-            [new_trajectory, new_times, new_obs_config] = self.propose(trajectory,
-                                                           times, max_time, obs_config)
+            [new_trajectory, new_times, new_obs_config] = self.propose(self.trajectory[0],
+                                                           self.trajectory[1], max_time, self.trajectory[2])
             new_obs_traj = self.calculate_trajectory_observables(new_trajectory, new_times)
             
             # Accept or reject
             t1 = timelib.time()
-            new_prob = self.criterion(new_obs_config, new_obs_traj, self) 
-            accept = self.metropolis(prob, new_prob)
+            new_prob = self.criterion(new_times, new_obs_config, new_obs_traj, self) 
+            accept = self.metropolis(self.trajectory[4], new_prob)
+            #print(self.trajectory[4])
+            #print(new_prob)
             if accept:
                 # Update the variables
-                trajectory = new_trajectory
-                times = new_times
-                obs_config = new_obs_config
-                obs_traj = new_obs_traj
-                prob = new_prob  
-                acceptance += 1
+                self.trajectory = [new_trajectory, new_times, new_obs_config, new_obs_traj, new_prob]
+                self.acceptance += 1
             
             # Store observables
             if i >= warm_up:
                 j = 0
                 for idx in self.obs_config: # Configurations
-                    measure = self.time_integrate(obs_config[j], times, max_time)
+                    measure = self.time_integrate(self.trajectory[2][j], self.trajectory[1], max_time)
                     self.update_observable(idx, measure)
                     j += 1
                 j = 0
                 for idx in self.obs_traj: # Trajectories
-                    self.update_observable(idx, obs_traj[j])
+                    self.update_observable(idx, self.trajectory[3][j])
                     j += 1
                 
                 self.num_sims += 1
             
             # Save
             if not quiet:
-                print("Simulation "+str(i)+"/"+str(num_sim+warm_up)+" complete.")
+                print("Simulation "+str(i+1)+"/"+str(num_sim+warm_up)+" complete.")
         if not quiet:
-            print("Acceptance rate: "+str(acceptance/(num_sim+warm_up)))
+            print("Acceptance rate: "+str(self.acceptance/(num_sim+warm_up)))
         
         return True
-
+    
 
     

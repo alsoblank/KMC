@@ -50,7 +50,7 @@ class spin():
             state (numpy array): the input state
         """
         
-        self.state = state
+        self.state = np.asarray(state)
         return True
     
     

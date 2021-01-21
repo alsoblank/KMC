@@ -1,2 +1,8 @@
 test data/
 test.py
+.spyproject/
+Fredkin Data/
+FA.py
+fredkin.py
+*.pyo
+*.pyc

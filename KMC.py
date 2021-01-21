@@ -121,7 +121,7 @@ class KMC():
                     for obj_idx in obs_idxs:
                         measure = self.observables[obj_idx][1](self.model.state, self)
                         observables[i].append(measure)
-                    i += 1
+                        i += 1
                 
                 # Store new trajectory information
                 idxs.append(idx)
